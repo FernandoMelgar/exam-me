@@ -35,4 +35,14 @@
     <orderEntry type="library" scope="PROVIDED" name="sinatra (v2.2.0, asdf: 3.1.1) [gem]" level="application" />
     <orderEntry type="library" scope="PROVIDED" name="tilt (v2.0.10, asdf: 3.1.1) [gem]" level="application" />
   </component>
+  <component name="RakeTasksCache">
+    <option name="myRootTask">
+      <RakeTaskImpl id="rake">
+        <subtasks>
+          <RakeTaskImpl description="Run tests" fullCommand="test" id="test" />
+          <RakeTaskImpl description="" fullCommand="default" id="default" />
+        </subtasks>
+      </RakeTaskImpl>
+    </option>
+  </component>
 </module>
