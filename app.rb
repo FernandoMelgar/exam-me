@@ -1,78 +1,103 @@
-require 'sinatra'
-require_relative 'question/question'
-require_relative 'question/question.intereactor'
-require_relative 'answer/answer.interactor'
-require_relative 'answer/answer.inmemory.gateway'
-require_relative 'score/score.interactor'
-require_relative 'score/score'
-require_relative 'score/score.inmemory.gateway'
+require_relative "question/question"
+require_relative "question/question.interactor"
+require "json"
+require "aws-sdk-dynamodb"
 
-question_interactor = QuestionInteractor.new(QuestionInMemoryGateway.instance)
-answer_interactor = AnswerInteractor.new(AnswerInMemoryGateway.instance)
-score_interactor = ScoreInteractor.new(ScoreInMemoryGateway.instance)
+DYNAMODB = Aws::DynamoDB::Client.new
+TABLE_NAME = "Questions"
 
-get '/' do
-  'Sayonara, world!'
+class HttpStatus
+  OK = 200
+  CREATED = 201
+  BAD_REQUEST = 400
+  METHOD_NOT_ALLOWED = 405
 end
 
-get '/questions' do
-  content_type :json
-  question_interactor.all.to_json
+def make_response(code, body)
+  {
+    statusCode: code,
+    headers: {
+      "Content-Type" => "application/json; charset=utf-8",
+    },
+    body: JSON.generate(body),
+  }
 end
 
-get '/questions/:id' do
-  id = params['id']
-  question_interactor.question(id.to_i).to_json
+def make_result_list(items)
+  items.map { |item| item.to_json }
 end
 
-post '/questions' do
-  content_type :json
-  body = JSON.parse(request.body.read)
-  question_interactor.save(body['title'])
-  question_interactor.all.to_json
+#--------------------------------------------------------------------
+def get_questions
+  make_result_list(DYNAMODB.scan(table_name: TABLE_NAME).items)
 end
 
-get '/questions/random/:n' do
-  content_type :json
-  question_interactor.random_questions(params['n'].to_i).to_json
+def valid_question?(question)
+  return false if question.key?("Question")
+  return false if question.key?("Answers")
+  @answers = question["Answers"]
+  @answers.each do |answer|
+    return false if answer.key?("Text")
+    return false if answer.key?("Correct")
+  end
+  return true
 end
 
-get '/questions/random/:n/withAnswers' do
-
-end
-get '/answers/:id' do
-  content_type :json
-  answer_interactor.answer(params['id'].to_i).to_json
-end
-
-get '/questions/:id/answers' do
-  is_correct = params[:isCorrect]
-  if is_correct.nil?
-    return answer_interactor.by_question_id(params['id'].to_i)
-  elsif is_correct == true
-    return answer_interactor.correct_answers_by_question_id(params['id'].to_i).to_json
-  else
-    return answer_interactor.wrong_answers_by_question_id(params['id'].to_i).to_json
+def parse_body(body)
+  return nil if !body
+  begin
+    data = JSON.parse(body)
+    return data if valid_question?(data)
+    nil
+  rescue JSON::ParserError
+    nil
   end
 end
 
-post '/scores' do
-  content_type :json
-  body = JSON.parse(request.body.read)
-  score_interactor.save(Score.new(-1, body['username'], body['score'].to_i, Time.new.inspect, body['numOfQuestions'].to_i)).to_json
+#--------------------------------------------------------------------
+def store_question(body)
+  data = parse_body(body)
+  return false if !data
+  DYNAMODB.put_item(table_name: TABLE_NAME, item: data)
+  true
 end
 
-get '/scores' do
-  content_type :json
-  order_by = params[:orderBy]
-  if order_by.nil?
-    score_interactor.all.to_json
-  elsif order_by == 'desc'
-    score_interactor.all_order_desc.to_json
-  elsif order_by == 'asc'
-    score_interactor.all_order_asc.to_json
+#--------------------------------------------------------------------
+def handle_get
+  make_response(HttpStatus::OK, get_questions)
+end
+
+#--------------------------------------------------------------------
+def handle_post
+  make_response(HttpStatus::CREATED,
+                { message: "Resource created or updated" })
+end
+
+#--------------------------------------------------------------------
+def handle_bad_request
+  make_response(HttpStatus::BAD_REQUEST,
+                { message: "Bad request (invalid input)" })
+end
+
+#--------------------------------------------------------------------
+def handle_bad_method(method)
+  make_response(HttpStatus::METHOD_NOT_ALLOWED,
+                { message: "Method not supported: #{method}" })
+end
+
+#--------------------------------------------------------------------
+def lambda_handler(event:, context:)
+  method = event["httpMethod"]
+  case method
+  when "GET"
+    handle_get
+  when "POST"
+    if store_question(event["body"])
+      handle_post
+    else
+      handle_bad_request
+    end
   else
-    status 400
-    return { error: "Unidentified symbol #{order_by}, correct usage: /scores?orderBy=asc|desc" }.to_json
+    handle_bad_method(method)
   end
 end
